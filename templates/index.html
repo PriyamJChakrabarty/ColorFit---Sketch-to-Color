@@ -144,6 +144,7 @@
         </div>
         <button onclick="undo()" id="undoButton">Undo</button>
         <button onclick="clearCanvas()">Clear</button>
+        <button onclick="sendSketch()" id="generateButton">Generate Output</button>
         <button onclick="downloadColoredImage()">Download</button>
         <div>
             <label for="traceImage">Upload Image to Trace:</label>
@@ -152,9 +153,11 @@
     </div>
 
     <script>
+        // Visible Canvas: For displaying trace image and user drawing
         const canvas = document.getElementById('sketchCanvas');
         const ctx = canvas.getContext('2d');
 
+        // Off-Screen Canvas: For storing only user drawing
         const offScreenCanvas = document.createElement('canvas');
         const offScreenCtx = offScreenCanvas.getContext('2d');
         offScreenCanvas.width = canvas.width;
@@ -175,19 +178,29 @@
         let undoLimit = 10;
         let traceImage = null;
 
-        let sendInterval = null;
+        console.log('[INIT] Canvas initialized with dimensions:', canvas.width, 'x', canvas.height);
+        console.log('[INIT] Off-screen canvas initialized with dimensions:', offScreenCanvas.width, 'x', offScreenCanvas.height);
 
-        colorPicker.addEventListener('change', (e) => brushColor = e.target.value);
-        brushSize.addEventListener('input', (e) => brushWidth = e.target.value);
+        colorPicker.addEventListener('change', (e) => {
+            brushColor = e.target.value;
+            console.log('[COLOR] Brush color changed to:', brushColor);
+        });
+        brushSize.addEventListener('input', (e) => {
+            brushWidth = e.target.value;
+            console.log('[BRUSH] Brush size changed to:', brushWidth);
+        });
 
         traceImageInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (file) {
+                console.log('[TRACE] Loading trace image:', file.name, 'Size:', file.size, 'bytes');
                 const reader = new FileReader();
                 reader.onload = (e) => {
+                    console.log('[TRACE] File read complete, creating image object');
                     const img = new Image();
                     img.onload = () => {
                         traceImage = img;
+                        console.log('[TRACE] Trace image loaded successfully. Dimensions:', img.width, 'x', img.height);
                         drawTraceImage();
                     };
                     img.src = e.target.result;
@@ -198,19 +211,27 @@
 
         function drawTraceImage() {
             if (traceImage) {
-                ctx.clearRect(0, 0, canvas.width, canvas.height); 
-                ctx.globalAlpha = 0.3; 
+                console.log('[TRACE] Drawing trace image on canvas at 30% opacity');
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+                ctx.globalAlpha = 0.3; // Set transparency for tracing
                 ctx.drawImage(traceImage, 0, 0, canvas.width, canvas.height);
-                ctx.globalAlpha = 1.0; 
+                ctx.globalAlpha = 1.0; // Reset transparency
 
+                // Redraw user drawing from off-screen canvas
                 ctx.drawImage(offScreenCanvas, 0, 0);
+                console.log('[TRACE] Trace image drawn, user drawing overlaid');
             }
         }
 
         function saveState() {
-            if (canvasHistory.length >= undoLimit) canvasHistory.shift();
+            console.log('[STATE] Saving canvas state. Current history length:', canvasHistory.length);
+            if (canvasHistory.length >= undoLimit) {
+                canvasHistory.shift();
+                console.log('[STATE] History limit reached, removing oldest state');
+            }
             if (offScreenHistory.length >= undoLimit) offScreenHistory.shift();
 
+            // Save visible canvas state
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
             tempCanvas.width = canvas.width;
@@ -218,6 +239,7 @@
             tempCtx.drawImage(canvas, 0, 0);
             canvasHistory.push(tempCanvas.toDataURL());
 
+            // Save off-screen canvas state
             const tempOffScreenCanvas = document.createElement('canvas');
             const tempOffScreenCtx = tempOffScreenCanvas.getContext('2d');
             tempOffScreenCanvas.width = offScreenCanvas.width;
@@ -225,6 +247,7 @@
             tempOffScreenCtx.drawImage(offScreenCanvas, 0, 0);
             offScreenHistory.push(tempOffScreenCanvas.toDataURL());
 
+            console.log('[STATE] State saved successfully. New history length:', canvasHistory.length);
             updateUndoButton();
         }
 
@@ -234,22 +257,15 @@
 
         canvas.addEventListener('mousedown', () => {
             drawing = true;
+            console.log('[DRAW] Mouse down - drawing started');
             saveState();
-
-            if (!sendInterval) {
-                sendInterval = setInterval(sendSketch, 100);
-            }
         });
 
         canvas.addEventListener('mouseup', () => {
             drawing = false;
             ctx.beginPath();
             offScreenCtx.beginPath();
-
-            if (sendInterval) {
-                clearInterval(sendInterval);
-                sendInterval = null;
-            }
+            console.log('[DRAW] Mouse up - drawing stopped');
         });
 
         canvas.addEventListener('mousemove', (event) => {
@@ -265,11 +281,13 @@
             ctx.lineCap = 'round';
             ctx.strokeStyle = brushColor;
 
+            // Draw on visible canvas
             ctx.lineTo(x, y);
             ctx.stroke();
             ctx.beginPath();
             ctx.moveTo(x, y);
 
+            // Draw on off-screen canvas
             offScreenCtx.lineWidth = brushWidth;
             offScreenCtx.lineCap = 'round';
             offScreenCtx.strokeStyle = brushColor;
@@ -281,70 +299,99 @@
         });
 
         function undo() {
+            console.log('[UNDO] Undo requested. Current history length:', canvasHistory.length);
             if (canvasHistory.length > 0 && offScreenHistory.length > 0) {
                 const previousState = canvasHistory.pop();
                 const previousOffScreenState = offScreenHistory.pop();
+                console.log('[UNDO] Restoring previous state. Remaining history:', canvasHistory.length);
 
+                // Restore visible canvas
                 const img = new Image();
                 img.src = previousState;
                 img.onload = () => {
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     ctx.drawImage(img, 0, 0);
+                    console.log('[UNDO] Visible canvas restored');
 
+                    // Restore off-screen canvas
                     const offImg = new Image();
                     offImg.src = previousOffScreenState;
                     offImg.onload = () => {
                         offScreenCtx.clearRect(0, 0, offScreenCanvas.width, offScreenCanvas.height);
                         offScreenCtx.drawImage(offImg, 0, 0);
+                        console.log('[UNDO] Off-screen canvas restored');
                         drawTraceImage();
                     };
                 };
                 updateUndoButton();
             } else {
+                console.log('[UNDO] Nothing to undo');
                 alert('Nothing to undo!');
             }
         }
 
         function clearCanvas() {
+            console.log('[CLEAR] Clearing all canvases and resetting state');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             offScreenCtx.clearRect(0, 0, offScreenCanvas.width, offScreenCanvas.height);
             ctx.beginPath();
             offScreenCtx.beginPath();
             coloredImage.src = '';
-            traceImage = null; 
+            traceImage = null; // Clear the trace image
             canvasHistory.length = 0;
             offScreenHistory.length = 0;
+            console.log('[CLEAR] Canvas cleared, history reset, trace image removed');
             updateUndoButton();
         }
 
         async function sendSketch() {
-            const dataURL = offScreenCanvas.toDataURL('image/png'); 
+            console.log('[GENERATE] Starting sketch generation process');
+            const dataURL = offScreenCanvas.toDataURL('image/png'); // Use off-screen canvas
+            const dataSize = dataURL.length;
+            console.log('[GENERATE] Canvas converted to base64 PNG. Size:', dataSize, 'characters');
+
             try {
+                console.log('[GENERATE] Sending POST request to http://127.0.0.1:5000/process_sketch');
+                const startTime = performance.now();
+
                 const response = await fetch('http://127.0.0.1:5000/process_sketch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ image: dataURL }),
                 });
 
+                const endTime = performance.now();
+                const duration = (endTime - startTime).toFixed(2);
+                console.log('[GENERATE] Response received in', duration, 'ms. Status:', response.status);
+
                 if (response.ok) {
                     const data = await response.json();
+                    console.log('[GENERATE] Response parsed successfully');
+                    console.log('[GENERATE] Colored image size:', data.coloredImage ? data.coloredImage.length : 0, 'characters');
                     coloredImage.src = `data:image/png;base64,${data.coloredImage}`;
+                    console.log('[GENERATE] ✅ Colored image displayed successfully');
                 } else {
-                    console.error('Error in response:', response.statusText);
+                    console.error('[GENERATE] ❌ Error in response:', response.status, response.statusText);
+                    const errorText = await response.text();
+                    console.error('[GENERATE] Error details:', errorText);
                 }
             } catch (error) {
-                console.error('Error sending sketch:', error);
+                console.error('[GENERATE] ❌ Network or processing error:', error);
+                console.error('[GENERATE] Error type:', error.name);
+                console.error('[GENERATE] Error message:', error.message);
             }
         }
 
         function downloadColoredImage() {
+            console.log('[DOWNLOAD] Starting image download');
             const link = document.createElement('a');
             link.download = 'colored_image.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
+            console.log('[DOWNLOAD] Download initiated for colored_image.png');
         }
 
-        updateUndoButton(); 
+        updateUndoButton(); // Initial button state
     </script>
 </body>
 </html>

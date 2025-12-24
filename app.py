@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 import base64
 import io
 from PIL import Image
@@ -6,10 +7,12 @@ import numpy as np
 import tensorflow as tf
 import os
 
+# Initialize Flask app
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 c = 0
 
-
+# Load the GAN generator model
 model = tf.keras.models.load_model('Models/generator5.h5')
 
 def preprocess_image(image_data):
@@ -18,20 +21,24 @@ def preprocess_image(image_data):
     Adds batch and channel dimensions to the input.
     Saves the received image and adds a white background if necessary.
     """
+    # Decode base64 image
     image = Image.open(io.BytesIO(base64.b64decode(image_data.split(",")[1]))).convert("RGBA")
     
+    # Save the received image
     save_image(image, prefix='received')
 
+    # Add white background if image has transparency
     if image.mode == 'RGBA':
         bg = Image.new("RGBA", image.size, (255, 255, 255, 255))
         image = Image.alpha_composite(bg, image).convert("L")
     else:
         image = image.convert("L")
     
-    image = image.resize((256, 256))  
-    image_array = np.array(image) / 255.0  
+    image = image.resize((256, 256))  # Resize to match the model input size
+    image_array = np.array(image) / 255.0  # Normalize to [0, 1]
     
-    image_array = image_array[np.newaxis, ..., np.newaxis] 
+    # Add batch and channel dimensions
+    image_array = image_array[np.newaxis, ..., np.newaxis]  # Shape: (1, 256, 256, 1)
     return image_array
 
 def postprocess_image(model_output):
@@ -39,9 +46,11 @@ def postprocess_image(model_output):
     Convert the model output to a base64-encoded image.
     Saves the generated colored image.
     """
-    image = ((model_output[0] + 1) * 127.5).astype(np.uint8)  
+    # Model output is expected to be normalized in [-1, 1], so rescale it to [0, 255]
+    image = ((model_output[0] + 1) * 127.5).astype(np.uint8)  # Rescale [-1, 1] to [0, 255]
     image = Image.fromarray(image)
     
+    # Save the generated image
     save_image(image, prefix='generated')
     
     buffered = io.BytesIO()
@@ -69,15 +78,20 @@ def process_sketch():
     Receive sketch image, add white background, save it, process it through the GAN, and return the colored image.
     """
     try:
+        # Parse the incoming request
         data = request.get_json()
         image_data = data['image']
 
+        # Preprocess the sketch
         sketch = preprocess_image(image_data)
         
+        # Generate colored image
         colored_image = model.predict(sketch)
 
+        # Postprocess the generated image
         colored_image_base64 = postprocess_image(colored_image)
 
+        # Return the result
         return jsonify({'coloredImage': colored_image_base64})
     except Exception as e:
         print(f"Error processing sketch: {e}")
